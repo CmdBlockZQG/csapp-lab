@@ -341,7 +341,7 @@ word f_pc = [
 ];
 ```
 
-最后将流水线中判断分支预测错误的语句进行修改：
+最后对流水线中判断分支预测错误的语句进行修改：
 
 ```
 E_icode == IJXX && !e_Cnd  # old
@@ -406,10 +406,433 @@ E_icode == IJXX && E_ifun != UNCOND && e_Cnd  # new
 
 backward taken, forward not-taken strategy when predict PC
 
+在预测PC时改变策略：
+
+```
+word f_predPC = [
+	f_icode == ICALL : f_valC;  # call 直接跳转
+	f_icode == IJXX && (f_ifun == UNCOND || f_valC < f_valP) : f_valC;  # 无条件跳转或后向跳转
+	1 : f_valP;  # forward not taken
+];
+```
+
+注意到对于所有JXX指令，都不操作内存和寄存器文件，所以流水线寄存器中的val都可以被用来存储地址。这里我们使用valE存储valC（由valC和0在ALU中加法得到），用valA存储valP（直接传递）。
+
+```
+word aluA = [
+	E_icode in { IRRMOVQ, IOPQ } : E_valA;
+	E_icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ, IJXX } : E_valC;  # 在JXX指令执行时，valC作为第一个加数
+	E_icode in { ICALL, IPUSHQ } : -8;
+	E_icode in { IRET, IPOPQ } : 8;
+];
+
+word aluB = [
+	E_icode in { IRMMOVQ, IMRMOVQ, IOPQ, ICALL, 
+		     IPUSHQ, IRET, IPOPQ } : E_valB;
+	E_icode in { IRRMOVQ, IIRMOVQ, IJXX } : 0;  # 在JXX指令执行时，0作为第二个加数
+	# Other instructions don't need ALU
+];
+
+word e_valA = E_valA;
+```
+
+在JXX指令执行阶段，aluA设置为E_valC，aluB设置为0，就会在e_valE中得到valC，进而将valC传入M_valE。直接传递valA，可将valP传入M_valA。
+
+这样，Select PC就可以使用M_valE和M_valA在分支预测错误时修正产生正确的PC。
+
+```
+word f_pc = [  # valC in M_valE, valP in M_valA
+	M_icode == IJXX && M_ifun != UNCOND && M_Cnd && M_valE >= M_valA : M_valE;  # 修正应进行的向后跳转
+	M_icode == IJXX && M_ifun != UNCOND && !M_Cnd && M_valE < M_valA : M_valA;  # 修正不应进行的向前跳转
+	W_icode == IRET : W_valM;
+	1 : F_predPC;
+];
+```
+
+最后对流水线中判断分支预测错误的语句进行修改：
+
+```
+E_icode == IJXX && !e_Cnd  # old
+E_icode == IJXX && E_ifun != UNCOND && ((e_Cnd && E_valC >= E_valA) || (!e_Cnd && E_valC < E_valA))  # new
+```
+
+```diff
+--- pipe-btfnt-orig.hcl
++++ pipe-btfnt.hcl
+@@ -139,7 +139,8 @@
+ ## What address should instruction be fetched at
+ word f_pc = [
+        # Mispredicted branch.  Fetch at incremented PC
+-       M_icode == IJXX && !M_Cnd : M_valA;
++       M_icode == IJXX && M_ifun != UNCOND && M_Cnd && M_valE >= M_valA : M_valE;
++       M_icode == IJXX && M_ifun != UNCOND && !M_Cnd && M_valE < M_valA : M_valA;
+        # Completion of RET instruction
+        W_icode == IRET : W_valM;
+        # Default: Use predicted value of PC
+@@ -183,8 +184,9 @@
+ # Predict next value of PC
+ word f_predPC = [
+        # BBTFNT: This is where you'll change the branch prediction rule
+-       f_icode in { IJXX, ICALL } : f_valC;
+-       1 : f_valP;
++       f_icode == ICALL : f_valC;  # call
++       f_icode == IJXX && (f_ifun == UNCOND || f_valC < f_valP) : f_valC;  # unconditional or backward
++       1 : f_valP;  # forward not taken
+ ];
+
+ ################ Decode Stage ######################################
+@@ -247,7 +249,7 @@
+ ## Select input A to ALU
+ word aluA = [
+        E_icode in { IRRMOVQ, IOPQ } : E_valA;
+-       E_icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ } : E_valC;
++       E_icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ, IJXX } : E_valC;
+        E_icode in { ICALL, IPUSHQ } : -8;
+        E_icode in { IRET, IPOPQ } : 8;
+        # Other instructions don't need ALU
+@@ -257,7 +259,7 @@
+ word aluB = [
+        E_icode in { IRMMOVQ, IMRMOVQ, IOPQ, ICALL,
+                     IPUSHQ, IRET, IPOPQ } : E_valB;
+-       E_icode in { IRRMOVQ, IIRMOVQ } : 0;
++       E_icode in { IRRMOVQ, IIRMOVQ, IJXX } : 0;
+        # Other instructions don't need ALU
+ ];
+
+@@ -343,7 +345,7 @@
+
+ bool D_bubble =
+        # Mispredicted branch
+-       (E_icode == IJXX && !e_Cnd) ||
++       (E_icode == IJXX && E_ifun != UNCOND && ((e_Cnd && E_valC >= E_valA) || (!e_Cnd && E_valC < E_valA))) ||
+        # BBTFNT: This condition will change
+        # Stalling at fetch while ret passes through pipeline
+        # but not condition for a load/use hazard
+@@ -355,7 +357,7 @@
+ bool E_stall = 0;
+ bool E_bubble =
+        # Mispredicted branch
+-       (E_icode == IJXX && !e_Cnd) ||
++       (E_icode == IJXX && E_ifun != UNCOND && ((e_Cnd && E_valC >= E_valA) || (!e_Cnd && E_valC < E_valA))) ||
+        # BBTFNT: This condition will change
+        # Conditions for a load/use hazard
+        E_icode in { IMRMOVQ, IPOPQ } &&
+```
+
 ## 4.57 PIPE-lf
 
 load forwarding
 
+只有rmmovq和pushq会在直到访存阶段才使用某个寄存器的值，而且它们都将rA寄存器中的值写入内存。
+
+```
+E_icode in { IMRMOVQ, IPOPQ } && E_dstM in { d_srcA, d_srcB }  # 原来的加载/使用冒险条件
+D_icode in { IRMMOVQ, IPUSHQ } && E_dstM == d_srcA  # 加载转发能够生效的条件
+
+E_icode in { IMRMOVQ, IPOPQ } && (
+	E_dstM == d_srcB ||
+	(E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ }))
+)  # 加入加载转发后，加载/使用冒险条件
+```
+把新的加载/使用冒险条件替换进流水线控制逻辑。
+
+Fwd A实现很简单，只要在加载转发能够生效的条件下将访存阶段读出来的内存值转发到e_valA就可以了。
+
+```
+word e_valA = [
+	E_icode in { IRMMOVQ, IPUSHQ } && M_dstM == E_srcA : m_valM;  # 上面加载转发能够生效的条件改了个阶段
+	1 : E_valA;  # 其他情况维持不变
+];
+```
+
+```diff
+--- pipe-lf-orig.hcl
++++ pipe-lf.hcl
+@@ -271,6 +271,7 @@
+ ##   from memory stage when appropriate
+ ## Here it is set to the default used in the normal pipeline
+ word e_valA = [
++       E_icode in { IRMMOVQ, IPUSHQ } && M_dstM == E_srcA : m_valM;
+        1 : E_valA;  # Use valA from stage pipe register
+ ];
+
+@@ -329,7 +330,7 @@
+ bool F_stall =
+        # Conditions for a load/use hazard
+        ## Set this to the new load/use condition
+-       0 ||
++       (E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })))) ||
+        # Stalling at fetch while ret passes through pipeline
+        IRET in { D_icode, E_icode, M_icode };
+
+@@ -338,14 +339,14 @@
+ bool D_stall =
+        # Conditions for a load/use hazard
+        ## Set this to the new load/use condition
+-       0;
++       E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })));
+
+ bool D_bubble =
+        # Mispredicted branch
+        (E_icode == IJXX && !e_Cnd) ||
+        # Stalling at fetch while ret passes through pipeline
+        # but not condition for a load/use hazard
+ IPUSHQ })))) &&
+          IRET in { D_icode, E_icode, M_icode };
+
+ # Should I stall or inject a bubble into Pipeline Register E?
+@@ -356,7 +357,7 @@
+        (E_icode == IJXX && !e_Cnd) ||
+        # Conditions for a load/use hazard
+        ## Set this to the new load/use condition
+-       0;
++       E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })));
+
+ # Should I stall or inject a bubble into Pipeline Register M?
+ # At most one of these can be true.
+```
+
 ## 4.58 PIPE-1w
 
 register file have only one writing port now
+
+### 取指 F
+
+修改取指和指令预测逻辑，实现将pop指令取出两次：
+
+```
+word f_predPC = [
+	f_icode in { IJXX, ICALL } : f_valC;
+	f_icode == IPOPQ : f_pc;  # 当前指令为popq时，预测下一条指令地址为自身，作为pop2
+	1 : f_valP;
+];
+
+word f_icode = [
+	imem_error : INOP;
+	D_icode == IPOPQ : IPOP2;  # 当在译码阶段的指令是popq时说明当前取指阶段的指令是第二次取出的popq，将指令码更改为IPOP2
+	1: imem_icode;
+];
+```
+
+原来的popq被拆成两半，修改后popq将%rsp值减去8，pop2将-8(%rdp)值写入rA，所以现在只有pop2需要使用寄存器标记
+
+```
+bool instr_valid = f_icode in 
+	{ INOP, IHALT, IRRMOVQ, IIRMOVQ, IRMMOVQ, IMRMOVQ,
+	  IOPQ, IJXX, ICALL, IRET, IPUSHQ, IPOPQ, IPOP2 };  # 现在IPOP2也是合法的指令码
+
+bool need_regids =
+	f_icode in { IRRMOVQ, IOPQ, IPUSHQ, IPOP2,   # pop2需要使用寄存器标记，popq不需要了
+		     IIRMOVQ, IRMMOVQ, IMRMOVQ };
+```
+
+### 译码D / 写回 W
+
+都是译码阶段完成的操作，写回阶段根据译码阶段已经产生的dst进行写回。
+
+```
+word d_srcA = [
+	D_icode in { IRRMOVQ, IRMMOVQ, IOPQ, IPUSHQ  } : D_rA;
+	# D_icode in { IPOPQ, IRET } : RRSP;  原本popq需要valA中存放%rsp的值作为读取内存的地址，现在popq不需要读内存了，而pop2读内存的地址和mrmovq一样是valE，故不需要将%rsp的值再传进valA
+	D_icode == IRET : RRSP;
+	1 : RNONE;
+];
+
+word d_srcB = [
+	D_icode in { IOPQ, IRMMOVQ, IMRMOVQ  } : D_rB;
+	# D_icode in { IPUSHQ, IPOPQ, ICALL, IRET } : RRSP;
+	D_icode in { IPUSHQ, IPOPQ, ICALL, IRET, IPOP2 } : RRSP;  # ipop2需要对%rsp进行运算，故需要将其值传入valB
+	1 : RNONE;  # Don't need register
+];
+```
+
+```
+word d_dstE = [
+	D_icode in { IRRMOVQ, IIRMOVQ, IOPQ} : D_rB;  # 和之前一样，popq需要将运算(+8)后的%rsp值写回%rsp
+	D_icode in { IPUSHQ, IPOPQ, ICALL, IRET } : RRSP;
+	1 : RNONE;  # Don't write any register
+];
+
+word d_dstM = [
+	# D_icode in { IMRMOVQ, IPOPQ } : D_rA;  # popq不再需要读内存
+	D_icode in { IMRMOVQ, IPOP2 } : D_rA;  # pop2需要将读出的内存值写入目标寄存器
+	1 : RNONE;
+];
+```
+
+### 执行 E
+
+```
+word aluA = [
+	E_icode in { IRRMOVQ, IOPQ } : E_valA;
+	E_icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ } : E_valC;
+	E_icode in { ICALL, IPUSHQ, IPOP2 } : -8;  # pop2需要计算-8(%rdp)
+	E_icode in { IRET, IPOPQ } : 8;  # popq需要计算%rdp + 8
+];
+
+word aluB = [
+	E_icode in { IRMMOVQ, IMRMOVQ, IOPQ, ICALL, 
+		     IPUSHQ, IRET, IPOPQ, IPOP2 } : E_valB;  # valB中是%rsp的值
+	E_icode in { IRRMOVQ, IIRMOVQ } : 0;
+];
+```
+
+### 访存 M
+
+```
+word mem_addr = [
+	M_icode in { IRMMOVQ, IPUSHQ, ICALL, IMRMOVQ, IPOP2 } : M_valE;  # pop2将计算结果-8(%rdp)作为读内存的地址
+	# M_icode in { IPOPQ, IRET } : M_valA;
+	M_icode == IRET : M_valA;  # popq现在不读取内存了
+];
+
+bool mem_read = M_icode in { IMRMOVQ, IPOP2, IRET };  # 读内存的任务交给pop2了
+```
+
+### 流水线控制
+
+加载/使用数据冒险的条件需要修改。popq加载的功能移交给了pop2，所以条件应修改如下：
+
+```
+E_icode in { IMRMOVQ, IPOPQ } && E_dstM in { d_srcA, d_srcB }  # 原本
+E_icode in { IMRMOVQ, IPOP2 } && E_dstM in { d_srcA, d_srcB }  # 将IPOPQ直接改为IPOP2
+```
+
+### DIFF
+
+```diff
+--- pipe-1w-orig.hcl
++++ pipe-1w.hcl
+@@ -157,6 +157,7 @@
+ ## so that it will be IPOP2 when fetched for second time.
+ word f_icode = [
+        imem_error : INOP;
++       D_icode == IPOPQ : IPOP2;
+        1: imem_icode;
+ ];
+
+@@ -169,7 +170,7 @@
+ # Is instruction valid?
+ bool instr_valid = f_icode in
+        { INOP, IHALT, IRRMOVQ, IIRMOVQ, IRMMOVQ, IMRMOVQ,
+-         IOPQ, IJXX, ICALL, IRET, IPUSHQ, IPOPQ };
++         IOPQ, IJXX, ICALL, IRET, IPUSHQ, IPOPQ, IPOP2 };
+
+ # Determine status code for fetched instruction
+ word f_stat = [
+@@ -181,7 +182,7 @@
+
+ # Does fetched instruction require a regid byte?
+ bool need_regids =
+-       f_icode in { IRRMOVQ, IOPQ, IPUSHQ, IPOPQ,
++       f_icode in { IRRMOVQ, IOPQ, IPUSHQ, IPOP2,
+                     IIRMOVQ, IRMMOVQ, IMRMOVQ };
+
+ # Does fetched instruction require a constant word?
+@@ -192,6 +193,7 @@
+ word f_predPC = [
+        f_icode in { IJXX, ICALL } : f_valC;
+        ## 1W: Want to refetch popq one time
++       f_icode == IPOPQ : f_pc;
+        1 : f_valP;
+ ];
+
+@@ -204,14 +206,14 @@
+ ## What register should be used as the A source?
+ word d_srcA = [
+        D_icode in { IRRMOVQ, IRMMOVQ, IOPQ, IPUSHQ  } : D_rA;
+-       D_icode in { IPOPQ, IRET } : RRSP;
++       D_icode == IRET : RRSP;
+        1 : RNONE; # Don't need register
+ ];
+
+ ## What register should be used as the B source?
+ word d_srcB = [
+        D_icode in { IOPQ, IRMMOVQ, IMRMOVQ  } : D_rB;
+-       D_icode in { IPUSHQ, IPOPQ, ICALL, IRET } : RRSP;
++       D_icode in { IPUSHQ, IPOPQ, ICALL, IRET, IPOP2 } : RRSP;
+        1 : RNONE;  # Don't need register
+ ];
+
+@@ -224,7 +226,7 @@
+
+ ## What register should be used as the M destination?
+ word d_dstM = [
+-       D_icode in { IMRMOVQ, IPOPQ } : D_rA;
++       D_icode in { IMRMOVQ, IPOP2 } : D_rA;
+        1 : RNONE;  # Don't write any register
+ ];
+
+@@ -255,7 +257,7 @@
+ word aluA = [
+        E_icode in { IRRMOVQ, IOPQ } : E_valA;
+        E_icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ } : E_valC;
+-       E_icode in { ICALL, IPUSHQ } : -8;
++       E_icode in { ICALL, IPUSHQ, IPOP2 } : -8;
+        E_icode in { IRET, IPOPQ } : 8;
+        # Other instructions don't need ALU
+ ];
+@@ -263,7 +265,7 @@
+ ## Select input B to ALU
+ word aluB = [
+        E_icode in { IRMMOVQ, IMRMOVQ, IOPQ, ICALL,
+-                    IPUSHQ, IRET, IPOPQ } : E_valB;
++                    IPUSHQ, IRET, IPOPQ, IPOP2 } : E_valB;
+        E_icode in { IRRMOVQ, IIRMOVQ } : 0;
+        # Other instructions don't need ALU
+ ];
+@@ -292,13 +294,13 @@
+
+ ## Select memory address
+ word mem_addr = [
+-       M_icode in { IRMMOVQ, IPUSHQ, ICALL, IMRMOVQ } : M_valE;
+-       M_icode in { IPOPQ, IRET } : M_valA;
++       M_icode in { IRMMOVQ, IPUSHQ, ICALL, IMRMOVQ, IPOP2 } : M_valE;
++       M_icode == IRET : M_valA;
+        # Other instructions don't need address
+ ];
+
+ ## Set read control signal
+-bool mem_read = M_icode in { IMRMOVQ, IPOPQ, IRET };
++bool mem_read = M_icode in { IMRMOVQ, IPOP2, IRET };
+
+ ## Set write control signal
+ bool mem_write = M_icode in { IRMMOVQ, IPUSHQ, ICALL };
+@@ -350,7 +352,7 @@
+ bool F_bubble = 0;
+ bool F_stall =
+        # Conditions for a load/use hazard
+-       E_icode in { IMRMOVQ, IPOPQ } &&
++       E_icode in { IMRMOVQ, IPOP2 } &&
+         E_dstM in { d_srcA, d_srcB } ||
+        # Stalling at fetch while ret passes through pipeline
+        IRET in { D_icode, E_icode, M_icode };
+@@ -359,7 +361,7 @@
+ # At most one of these can be true.
+ bool D_stall =
+        # Conditions for a load/use hazard
+-       E_icode in { IMRMOVQ, IPOPQ } &&
++       E_icode in { IMRMOVQ, IPOP2 } &&
+         E_dstM in { d_srcA, d_srcB };
+
+ bool D_bubble =
+@@ -367,7 +369,7 @@
+        (E_icode == IJXX && !e_Cnd) ||
+        # Stalling at fetch while ret passes through pipeline
+        # but not condition for a load/use hazard
+-       !(E_icode in { IMRMOVQ, IPOPQ } && E_dstM in { d_srcA, d_srcB }) &&
++       !(E_icode in { IMRMOVQ, IPOP2 } && E_dstM in { d_srcA, d_srcB }) &&
+        # 1W: This condition will change
+          IRET in { D_icode, E_icode, M_icode };
+
+@@ -378,7 +380,7 @@
+        # Mispredicted branch
+        (E_icode == IJXX && !e_Cnd) ||
+        # Conditions for a load/use hazard
+-       E_icode in { IMRMOVQ, IPOPQ } &&
++       E_icode in { IMRMOVQ, IPOP2 } &&
+         E_dstM in { d_srcA, d_srcB};
+
+ # Should I stall or inject a bubble into Pipeline Register M?
+```
+
