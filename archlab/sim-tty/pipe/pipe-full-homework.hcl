@@ -50,7 +50,6 @@ wordsig RNONE    'REG_NONE'   	     # Special value indicating "no register"
 
 ##### ALU Functions referenced explicitly ##########################
 wordsig ALUADD	'A_ADD'		     # ALU should add its arguments
-wordsig UNCOND  'C_YES'       	     # Unconditional transfer
 
 ##### Possible instruction status values                       #####
 wordsig SBUB	'STAT_BUB'	# Bubble in stage
@@ -137,8 +136,7 @@ wordsig W_valM  'mem_wb_curr->valm'	# Memory M value
 ## What address should instruction be fetched at
 word f_pc = [
 	# Mispredicted branch.  Fetch at incremented PC
-	M_icode == IJXX && M_ifun != UNCOND && M_Cnd && M_valE >= M_valA : M_valE;
-	M_icode == IJXX && M_ifun != UNCOND && !M_Cnd && M_valE < M_valA : M_valA;
+	M_icode == IJXX && !M_Cnd : M_valA;
 	# Completion of RET instruction
 	W_icode == IRET : W_valM;
 	# Default: Use predicted value of PC
@@ -181,9 +179,8 @@ bool need_valC =
 
 # Predict next value of PC
 word f_predPC = [
-	f_icode == ICALL : f_valC;  # call
-	f_icode == IJXX && (f_ifun == UNCOND || f_valC < f_valP) : f_valC;  # unconditional or backward
-	1 : f_valP;  # forward not taken
+	f_icode in { IJXX, ICALL } : f_valC;
+	1 : f_valP;
 ];
 
 ################ Decode Stage ######################################
@@ -242,7 +239,7 @@ word d_valB = [
 ## Select input A to ALU
 word aluA = [
 	E_icode in { IRRMOVQ, IOPQ } : E_valA;
-	E_icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ, IIADDQ, IJXX } : E_valC;
+	E_icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ, IIADDQ } : E_valC;
 	E_icode in { ICALL, IPUSHQ } : -8;
 	E_icode in { IRET, IPOPQ } : 8;
 	# Other instructions don't need ALU
@@ -252,7 +249,7 @@ word aluA = [
 word aluB = [
 	E_icode in { IRMMOVQ, IMRMOVQ, IOPQ, ICALL, 
 		     IPUSHQ, IRET, IPOPQ, IIADDQ } : E_valB;
-	E_icode in { IRRMOVQ, IIRMOVQ, IJXX } : 0;
+	E_icode in { IRRMOVQ, IIRMOVQ } : 0;
 	# Other instructions don't need ALU
 ];
 
@@ -268,10 +265,7 @@ bool set_cc = E_icode in { IOPQ, IIADDQ } &&
 	!m_stat in { SADR, SINS, SHLT } && !W_stat in { SADR, SINS, SHLT };
 
 ## Generate valA in execute stage
-word e_valA = [
-	E_icode in { IRMMOVQ, IPUSHQ } && M_dstM == E_srcA : m_valM;
-	1 : E_valA;
-];
+word e_valA = E_valA;    # Pass valA through stage
 
 ## Set dstE to RNONE in event of not-taken conditional move
 word e_dstE = [
@@ -327,7 +321,8 @@ word Stat = [
 bool F_bubble = 0;
 bool F_stall =
 	# Conditions for a load/use hazard
-	(E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })))) ||
+	E_icode in { IMRMOVQ, IPOPQ } &&
+	 E_dstM in { d_srcA, d_srcB } ||
 	# Stalling at fetch while ret passes through pipeline
 	IRET in { D_icode, E_icode, M_icode };
 
@@ -335,11 +330,12 @@ bool F_stall =
 # At most one of these can be true.
 bool D_stall = 
 	# Conditions for a load/use hazard
-	E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })));
+	E_icode in { IMRMOVQ, IPOPQ } &&
+	 E_dstM in { d_srcA, d_srcB };
 
 bool D_bubble =
 	# Mispredicted branch
-	(E_icode == IJXX && E_ifun != UNCOND && ((e_Cnd && E_valC >= E_valA) || (!e_Cnd && E_valC < E_valA))) ||
+	(E_icode == IJXX && !e_Cnd) ||
 	# Stalling at fetch while ret passes through pipeline
 	# but not condition for a load/use hazard
 	!(E_icode in { IMRMOVQ, IPOPQ } && E_dstM in { d_srcA, d_srcB }) &&
@@ -350,9 +346,10 @@ bool D_bubble =
 bool E_stall = 0;
 bool E_bubble =
 	# Mispredicted branch
-	(E_icode == IJXX && E_ifun != UNCOND && ((e_Cnd && E_valC >= E_valA) || (!e_Cnd && E_valC < E_valA))) ||
+	(E_icode == IJXX && !e_Cnd) ||
 	# Conditions for a load/use hazard
-	E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })));
+	E_icode in { IMRMOVQ, IPOPQ } &&
+	 E_dstM in { d_srcA, d_srcB};
 
 # Should I stall or inject a bubble into Pipeline Register M?
 # At most one of these can be true.

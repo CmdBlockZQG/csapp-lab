@@ -836,3 +836,224 @@ E_icode in { IMRMOVQ, IPOP2 } && E_dstM in { d_srcA, d_srcB }  # 将IPOPQ直接�
  # Should I stall or inject a bubble into Pipeline Register M?
 ```
 
+# Lab
+
+## Part.A
+
+```
+# sum.ys
+
+.pos 0
+	irmovq stack, %rsp
+	irmovq ele1, %rdi
+	call sum_list
+	halt
+
+.align 8
+ele1:
+	.quad 0x00a
+	.quad ele2
+ele2:
+	.quad 0x0b0
+	.quad ele3
+ele3:
+	.quad 0xc00
+	.quad 0
+
+sum_list:
+	irmovq $0, %rax
+	jmp cnd
+loop:
+	mrmovq (%rdi), %rsi
+	addq %rsi, %rax
+	mrmovq 8(%rdi), %rdi
+cnd:
+	andq %rdi, %rdi
+	jne loop
+	ret
+
+.pos 0x200
+stack:
+
+```
+
+```
+# rsum.ys
+
+.pos 0
+	irmovq stack, %rsp
+	irmovq ele1, %rdi
+	call rsum_list
+	halt
+
+.align 8
+ele1:
+	.quad 0x00a
+	.quad ele2
+ele2:
+	.quad 0x0b0
+	.quad ele3
+ele3:
+	.quad 0xc00
+	.quad 0
+
+rsum_list:
+	andq %rdi, %rdi
+	jne ne
+	irmovq $0, %rax
+	ret
+ne:
+	mrmovq (%rdi), %rsi
+	pushq %rsi
+	mrmovq 8(%rdi), %rdi
+	call rsum_list
+	popq %rsi
+	addq %rsi, %rax
+	ret
+
+.pos 0x200
+stack:
+
+```
+
+```
+# copy.ys
+
+.pos 0
+	irmovq stack, %rsp
+	irmovq src, %rdi
+	irmovq dest, %rsi
+	irmovq $3, %rdx
+	call copy_block
+	halt
+
+.align 8
+src:
+	.quad 0x00a
+	.quad 0x0b0
+	.quad 0xc00
+dest:
+	.quad 0x111
+	.quad 0x222
+	.quad 0x333
+
+copy_block:
+	irmovq $0, %rax
+	irmovq $8, %r8
+	irmovq $1, %r9
+	jmp cnd
+loop:
+	mrmovq (%rdi), %rcx
+	addq %r8, %rdi
+	rmmovq %rcx, (%rsi)
+	addq %r8, %rsi
+	xorq %rcx, %rax
+	subq %r9, %rdx
+cnd:
+	andq %rdx, %rdx
+	jg loop
+	ret
+
+.pos 0x200
+stack:
+
+```
+
+## Part.B
+
+同Homework 4.52
+
+## Part.C
+
+**我只拿到了53.2/60.0分，Average CPE 7.84**
+
+ncopy部分直接疯狂展开，我直接一次循环复制5个，最后剩下的单独处理。
+
+```
+	irmovq $0, %rax
+	iaddq $-4, %rdx
+	jmp cnd
+loop:
+	mrmovq (%rdi), %rcx
+	mrmovq 8(%rdi), %r8
+	mrmovq 16(%rdi), %r9
+	mrmovq 24(%rdi), %r10
+	mrmovq 32(%rdi), %r11
+	iaddq $40, %rdi
+	iaddq $40, %rsi
+	rmmovq %rcx, -40(%rsi)
+	rmmovq %r8, -32(%rsi)
+	rmmovq %r9, -24(%rsi)
+	rmmovq %r10, -16(%rsi)
+	rmmovq %r11, -8(%rsi)
+
+	andq %rcx, %rcx
+	jle np1
+	iaddq $1, %rax
+np1:
+
+	andq %r8, %r8
+	jle np2
+	iaddq $1, %rax
+np2:
+
+	andq %r9, %r9
+	jle np3
+	iaddq $1, %rax
+np3:
+
+	andq %r10, %r10
+	jle np4
+	iaddq $1, %rax
+np4:
+
+	andq %r11, %r11
+	jle np5
+	iaddq $1, %rax
+np5:
+
+	iaddq $-5, %rdx
+cnd:
+	jg loop
+
+# 单独处理剩下部分
+	iaddq $3, %rdx
+	jl Done
+	je lf1
+
+	mrmovq 8(%rdi), %rcx
+	rmmovq %rcx, 8(%rsi)
+	andq %rcx, %rcx
+	jle lf2d
+	iaddq $1, %rax
+lf2d:
+	iaddq $-2, %rdx
+	jl lf1
+	je lf3
+
+	mrmovq 24(%rdi), %rcx
+	rmmovq %rcx, 24(%rsi)
+	andq %rcx, %rcx
+	jle lf3
+	iaddq $1, %rax
+lf3:
+	mrmovq 16(%rdi), %rcx
+	rmmovq %rcx, 16(%rsi)
+	andq %rcx, %rcx
+	jle lf1
+	iaddq $1, %rax
+
+lf1:
+	mrmovq (%rdi), %rcx
+	rmmovq %rcx, (%rsi)
+	andq %rcx, %rcx
+	jle Done
+	iaddq $1, %rax
+```
+
+对于流水线修改，使用了前面homework中的btfnt分支预测策略以及lf加载转发机制。
+
+
+
+
+

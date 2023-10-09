@@ -15,24 +15,84 @@ ncopy:
 
 ##################################################################
 # You can modify this portion
-	# Loop header
-	xorq %rax,%rax		# count = 0;
-	andq %rdx,%rdx		# len <= 0?
-	jle Done		# if so, goto Done:
+	irmovq $0, %rax
+	iaddq $-4, %rdx
+	jmp cnd
+loop:
+	mrmovq (%rdi), %rcx
+	mrmovq 8(%rdi), %r8
+	mrmovq 16(%rdi), %r9
+	mrmovq 24(%rdi), %r10
+	mrmovq 32(%rdi), %r11
+	iaddq $40, %rdi
+	iaddq $40, %rsi
+	rmmovq %rcx, -40(%rsi)
+	rmmovq %r8, -32(%rsi)
+	rmmovq %r9, -24(%rsi)
+	rmmovq %r10, -16(%rsi)
+	rmmovq %r11, -8(%rsi)
 
-Loop:	mrmovq (%rdi), %r10	# read val from src...
-	rmmovq %r10, (%rsi)	# ...and store it to dst
-	andq %r10, %r10		# val <= 0?
-	jle Npos		# if so, goto Npos:
-	irmovq $1, %r10
-	addq %r10, %rax		# count++
-Npos:	irmovq $1, %r10
-	subq %r10, %rdx		# len--
-	irmovq $8, %r10
-	addq %r10, %rdi		# src++
-	addq %r10, %rsi		# dst++
-	andq %rdx,%rdx		# len > 0?
-	jg Loop			# if so, goto Loop:
+	andq %rcx, %rcx
+	jle np1
+	iaddq $1, %rax
+np1:
+
+	andq %r8, %r8
+	jle np2
+	iaddq $1, %rax
+np2:
+
+	andq %r9, %r9
+	jle np3
+	iaddq $1, %rax
+np3:
+
+	andq %r10, %r10
+	jle np4
+	iaddq $1, %rax
+np4:
+
+	andq %r11, %r11
+	jle np5
+	iaddq $1, %rax
+np5:
+
+	iaddq $-5, %rdx
+cnd:
+	jg loop
+	iaddq $3, %rdx
+	jl Done
+	je lf1
+
+	mrmovq 8(%rdi), %rcx
+	rmmovq %rcx, 8(%rsi)
+	andq %rcx, %rcx
+	jle lf2d
+	iaddq $1, %rax
+lf2d:
+	iaddq $-2, %rdx
+	jl lf1
+	je lf3
+
+	mrmovq 24(%rdi), %rcx
+	rmmovq %rcx, 24(%rsi)
+	andq %rcx, %rcx
+	jle lf3
+	iaddq $1, %rax
+lf3:
+	mrmovq 16(%rdi), %rcx
+	rmmovq %rcx, 16(%rsi)
+	andq %rcx, %rcx
+	jle lf1
+	iaddq $1, %rax
+
+lf1:
+	mrmovq (%rdi), %rcx
+	rmmovq %rcx, (%rsi)
+	andq %rcx, %rcx
+	jle Done
+	iaddq $1, %rax
+
 ##################################################################
 # Do not modify the following section of code
 # Function epilogue.
