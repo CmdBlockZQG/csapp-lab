@@ -46,6 +46,10 @@ wordsig FNONE    'F_NONE'        # Default function code
 
 ##### Symbolic representation of Y86-64 Registers referenced      #####
 wordsig RRSP     'REG_RSP'    	     # Stack Pointer
+wordsig RRAX     'REG_RAX'
+wordsig RRDI     'REG_RDI'
+wordsig RRSI     'REG_RSI'
+wordsig RRCX     'REG_RCX'
 wordsig RNONE    'REG_NONE'   	     # Special value indicating "no register"
 
 ##### ALU Functions referenced explicitly ##########################
@@ -189,6 +193,7 @@ word f_predPC = [
 
 ## What register should be used as the A source?
 word d_srcA = [
+	D_icode == IIADDQ && D_rB == RRSI : RRCX;
 	D_icode in { IRRMOVQ, IRMMOVQ, IOPQ, IPUSHQ  } : D_rA;
 	D_icode in { IPOPQ, IRET } : RRSP;
 	1 : RNONE; # Don't need register
@@ -210,6 +215,7 @@ word d_dstE = [
 
 ## What register should be used as the M destination?
 word d_dstM = [
+	D_icode == IIADDQ && D_rB == RRDI : RRCX;
 	D_icode in { IMRMOVQ, IPOPQ } : D_rA;
 	1 : RNONE;  # Don't write any register
 ];
@@ -239,6 +245,7 @@ word d_valB = [
 
 ## Select input A to ALU
 word aluA = [
+	E_icode == IIADDQ && E_dstE in { RRDI, RRSI } : 8;
 	E_icode in { IRRMOVQ, IOPQ } : E_valA;
 	E_icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ, IIADDQ } : E_valC;
 	E_icode in { ICALL, IPUSHQ } : -8;
@@ -263,14 +270,20 @@ word alufun = [
 ## Should the condition codes be updated?
 bool set_cc = E_icode in { IOPQ, IIADDQ } &&
 	# State changes only during normal operation
-	!m_stat in { SADR, SINS, SHLT } && !W_stat in { SADR, SINS, SHLT };
+	!m_stat in { SADR, SINS, SHLT } && !W_stat in { SADR, SINS, SHLT } &&
+	!(E_icode == IIADDQ && E_dstE in { RRDI, RRSI, RRAX });
 
 ## Generate valA in execute stage
-word e_valA = E_valA;    # Pass valA through stage
+word e_valA = [
+	E_icode == IIADDQ && E_dstE == RRSI : m_valM;
+	E_icode in { IRMMOVQ, IPUSHQ } && M_dstM == E_srcA : m_valM;
+	1 : E_valA;
+];
 
 ## Set dstE to RNONE in event of not-taken conditional move
 word e_dstE = [
-	E_icode in { IRRMOVQ, IIADDQ } && !e_Cnd : RNONE;
+	E_icode == IRRMOVQ && !e_Cnd : RNONE;
+	E_icode == IIADDQ && !e_Cnd && E_dstE == RRAX : RNONE;
 	1 : E_dstE;
 ];
 
@@ -278,16 +291,18 @@ word e_dstE = [
 
 ## Select memory address
 word mem_addr = [
-	M_icode in { IRMMOVQ, IPUSHQ, ICALL, IMRMOVQ } : M_valE;
+	M_icode in { IRMMOVQ, IPUSHQ, ICALL, IMRMOVQ, IIADDQ } : M_valE;
 	M_icode in { IPOPQ, IRET } : M_valA;
 	# Other instructions don't need address
 ];
 
 ## Set read control signal
-bool mem_read = M_icode in { IMRMOVQ, IPOPQ, IRET };
+bool mem_read = M_icode in { IMRMOVQ, IPOPQ, IRET } ||
+				(M_icode == IIADDQ && M_dstE == RRDI);
 
 ## Set write control signal
-bool mem_write = M_icode in { IRMMOVQ, IPUSHQ, ICALL };
+bool mem_write = M_icode in { IRMMOVQ, IPUSHQ, ICALL } ||
+				(M_icode == IIADDQ && M_dstE == RRSI);
 
 #/* $begin pipe-m_stat-hcl */
 ## Update the status
@@ -322,8 +337,7 @@ word Stat = [
 bool F_bubble = 0;
 bool F_stall =
 	# Conditions for a load/use hazard
-	E_icode in { IMRMOVQ, IPOPQ } &&
-	 E_dstM in { d_srcA, d_srcB } ||
+	(E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })))) ||
 	# Stalling at fetch while ret passes through pipeline
 	IRET in { D_icode, E_icode, M_icode };
 
@@ -331,8 +345,7 @@ bool F_stall =
 # At most one of these can be true.
 bool D_stall = 
 	# Conditions for a load/use hazard
-	E_icode in { IMRMOVQ, IPOPQ } &&
-	 E_dstM in { d_srcA, d_srcB };
+	E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })));
 
 bool D_bubble =
 	# Mispredicted branch
@@ -349,8 +362,7 @@ bool E_bubble =
 	# Mispredicted branch
 	(E_icode == IJXX && !e_Cnd) ||
 	# Conditions for a load/use hazard
-	E_icode in { IMRMOVQ, IPOPQ } &&
-	 E_dstM in { d_srcA, d_srcB};
+	E_icode in { IMRMOVQ, IPOPQ } && (E_dstM == d_srcB || (E_dstM == d_srcA && !(D_icode in { IRMMOVQ, IPUSHQ })));
 
 # Should I stall or inject a bubble into Pipeline Register M?
 # At most one of these can be true.

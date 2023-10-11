@@ -16,33 +16,21 @@ ncopy:
 ##################################################################
 # You can modify this portion
 	irmovq $0, %rax
-    irmovq $1, %r8
-    andq %r8, %r8
-    iaddq $-1, %rdx
+    irmovq $-8, %r8
+    addq %r8, %rdi
+    addq %r8, %rsi
+    andq %rdx, %rdx
 	jmp cnd
 loop:
-	mrmovq (%rdi), %rcx
-    mrmovq 8(%rdi), %r8
-    iaddq $16, %rdi
-    rmmovq %rcx, (%rsi)
-    rmmovq %r8, 8(%rsi)
-    iaddq $16, %rsi
+	iaddq $114514, %rdi
+    iaddq $1919810, %rsi
     
     andq %rcx, %rcx
 	iaddq $1, %rax
 
-    andq %r8, %r8
-	iaddq $1, %rax
-
-	iaddq $-2, %rdx
+	iaddq $-1, %rdx
 cnd:
 	jg loop
-
-    jne Done
-    mrmovq (%rdi), %rcx
-    rmmovq %rcx, (%rsi)
-    andq %rcx, %rcx
-	iaddq $1, %rax
 
 ##################################################################
 # Do not modify the following section of code

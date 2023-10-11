@@ -965,95 +965,124 @@ stack:
 
 ## Part.C
 
-**我只拿到了53.2/60.0分，Average CPE 7.84**
-
-ncopy部分直接疯狂展开，我直接一次循环复制5个，最后剩下的单独处理。
+首先先按照homework 4.54实现iaddq，写出朴素ncopy代码如下：
 
 ```
 	irmovq $0, %rax
-	iaddq $-4, %rdx
+    andq %rdx, %rdx
 	jmp cnd
 loop:
 	mrmovq (%rdi), %rcx
-	mrmovq 8(%rdi), %r8
-	mrmovq 16(%rdi), %r9
-	mrmovq 24(%rdi), %r10
-	mrmovq 32(%rdi), %r11
-	iaddq $40, %rdi
-	iaddq $40, %rsi
-	rmmovq %rcx, -40(%rsi)
-	rmmovq %r8, -32(%rsi)
-	rmmovq %r9, -24(%rsi)
-	rmmovq %r10, -16(%rsi)
-	rmmovq %r11, -8(%rsi)
+    iaddq $8, %rdi
+    rmmovq %rcx, (%rsi)
+    iaddq $8, %rsi
+
+    andq %rcx, %rcx
+	jle np
+	iaddq $1, %rax
+np:
+
+	iaddq $-1, %rdx
+cnd:
+	jg loop
+```
+
+注意`mrmovq (%rdi), %rcx`和`rmmovq %rcx, (%rsi)`中间要隔开一条指令以避免加载使用数据冒险。这个版本的平均CPE为10.62，喜提零分。
+
+考虑优化循环中统计正数数量的条件判断。换成条件传送需要提前计算%rax+1的值，平均CPE表现反而会更劣。转换思路，为什么不把iaddq设置成如果条件满足就执行加法呢？
+
+修改取指F阶段功能码部分：
+
+```
+word f_ifun = [
+	imem_error : FNONE;
+	f_icode == IIADDQ : 6;  # greater
+	1: imem_ifun;
+];
+```
+
+将iaddq的功能码设置成和jg/cmovg相同，这样在执行阶段e_Cnd就会指示CC的内容是否意味着大于0。然后在执行阶段实现条件传送：
+
+```
+word e_dstE = [
+	E_icode in { IRRMOVQ, IIADDQ } && !e_Cnd : RNONE;
+	1 : E_dstE;
+];
+```
+
+如果条件不满足就像条件传送一样取消对寄存器的修改。这种改动并不会影响加法，因为ALU的功能码在非opq指令时始终是加法。
+
+```
+word alufun = [
+	E_icode == IOPQ : E_ifun;
+	1 : ALUADD;
+];
+```
+
+再修改ncopy的实现：
+
+```
+	irmovq $0, %rax
+	andq %rdx, %rdx
+	jmp cnd
+loop:
+	mrmovq (%rdi), %rcx
+	iaddq $8, %rdi  # 不受影响，因为此时CC由%rdx设置，其一定大于0
+	rmmovq %rcx, (%rsi)
+	iaddq $8, %rsi
 
 	andq %rcx, %rcx
-	jle np1
-	iaddq $1, %rax
-np1:
+	iaddq $1, %rax  # 直接根据%rcx是否>0条件加法
 
-	andq %r8, %r8
-	jle np2
-	iaddq $1, %rax
-np2:
+	iaddq $-1, %rdx
+cnd:
+	jg loop
+```
 
-	andq %r9, %r9
-	jle np3
-	iaddq $1, %rax
-np3:
+这个版本平均CPE为9.19。
 
-	andq %r10, %r10
-	jle np4
-	iaddq $1, %rax
-np4:
+然后再简单展开一下：
 
-	andq %r11, %r11
-	jle np5
+```
+	irmovq $0, %rax
+	irmovq $1, %r8
+    andq %r8, %r8  # 设置CC使得iaddq一定会执行
+    iaddq $-1, %rdx
+	jmp cnd
+loop:
+	mrmovq (%rdi), %rcx
+    mrmovq 8(%rdi), %r8
+    iaddq $16, %rdi
+    rmmovq %rcx, (%rsi)
+    rmmovq %r8, 8(%rsi)
+    iaddq $16, %rsi  # 一次循环搞两个
+    
+    andq %rcx, %rcx
 	iaddq $1, %rax
-np5:
 
-	iaddq $-5, %rdx
+    andq %r8, %r8
+	iaddq $1, %rax
+
+	iaddq $-2, %rdx
 cnd:
 	jg loop
 
-# 单独处理剩下部分
-	iaddq $3, %rdx
-	jl Done
-	je lf1
-
-	mrmovq 8(%rdi), %rcx
-	rmmovq %rcx, 8(%rsi)
-	andq %rcx, %rcx
-	jle lf2d
-	iaddq $1, %rax
-lf2d:
-	iaddq $-2, %rdx
-	jl lf1
-	je lf3
-
-	mrmovq 24(%rdi), %rcx
-	rmmovq %rcx, 24(%rsi)
-	andq %rcx, %rcx
-	jle lf3
-	iaddq $1, %rax
-lf3:
-	mrmovq 16(%rdi), %rcx
-	rmmovq %rcx, 16(%rsi)
-	andq %rcx, %rcx
-	jle lf1
-	iaddq $1, %rax
-
-lf1:
-	mrmovq (%rdi), %rcx
-	rmmovq %rcx, (%rsi)
-	andq %rcx, %rcx
-	jle Done
+    jne Done
+    mrmovq (%rdi), %rcx
+    rmmovq %rcx, (%rsi)
+    andq %rcx, %rcx
 	iaddq $1, %rax
 ```
 
-对于流水线修改，使用了前面homework中的btfnt分支预测策略以及lf加载转发机制。
+这个版本的平均CPE为7.45，已经满分了。其实继续展开还能更快，我试了下展开5次能到6.91的平均CPE。
 
+我还做了一些其他尝试：
 
+- 仅仅实现普通的iaddq，展开循环5次，平均CPE7.84，我没法做到满分。
 
+    代码文件`ncopy-simple.ys` `pipe-full-simple.hcl`
 
+- 实现高度集成的iaddq，根据寄存器不同实现不同的功能。除了实现上面的条件加法之外，将读写内存和增加指针结合进同一条指令，可以在**不进行循环展开**的情况下做到7.41的平均CPE。但由于指令的实现内部直接+8，在循环展开后无法享受到统一加法的速度提升，所以展开5次平均CPE提升相对较小，但也能到6.35。
+
+    代码文件`ncopy-magic.ys` `pipe-full-magic.hcl`
 

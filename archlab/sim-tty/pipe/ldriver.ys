@@ -29,81 +29,32 @@ ncopy:
 ##################################################################
 # You can modify this portion
 	irmovq $0, %rax
-	iaddq $-4, %rdx
+    irmovq $1, %r8
+    andq %r8, %r8
+    iaddq $-1, %rdx
 	jmp cnd
 loop:
 	mrmovq (%rdi), %rcx
-	mrmovq 8(%rdi), %r8
-	mrmovq 16(%rdi), %r9
-	mrmovq 24(%rdi), %r10
-	mrmovq 32(%rdi), %r11
-	iaddq $40, %rdi
-	iaddq $40, %rsi
-	rmmovq %rcx, -40(%rsi)
-	rmmovq %r8, -32(%rsi)
-	rmmovq %r9, -24(%rsi)
-	rmmovq %r10, -16(%rsi)
-	rmmovq %r11, -8(%rsi)
-
-	andq %rcx, %rcx
-	jle np1
+    mrmovq 8(%rdi), %r8
+    iaddq $16, %rdi
+    rmmovq %rcx, (%rsi)
+    rmmovq %r8, 8(%rsi)
+    iaddq $16, %rsi
+    
+    andq %rcx, %rcx
 	iaddq $1, %rax
-np1:
 
-	andq %r8, %r8
-	jle np2
+    andq %r8, %r8
 	iaddq $1, %rax
-np2:
 
-	andq %r9, %r9
-	jle np3
-	iaddq $1, %rax
-np3:
-
-	andq %r10, %r10
-	jle np4
-	iaddq $1, %rax
-np4:
-
-	andq %r11, %r11
-	jle np5
-	iaddq $1, %rax
-np5:
-
-	iaddq $-5, %rdx
+	iaddq $-2, %rdx
 cnd:
 	jg loop
-	iaddq $3, %rdx
-	jl Done
-	je lf1
 
-	mrmovq 8(%rdi), %rcx
-	rmmovq %rcx, 8(%rsi)
-	andq %rcx, %rcx
-	jle lf2d
-	iaddq $1, %rax
-lf2d:
-	iaddq $-2, %rdx
-	jl lf1
-	je lf3
-
-	mrmovq 24(%rdi), %rcx
-	rmmovq %rcx, 24(%rsi)
-	andq %rcx, %rcx
-	jle lf3
-	iaddq $1, %rax
-lf3:
-	mrmovq 16(%rdi), %rcx
-	rmmovq %rcx, 16(%rsi)
-	andq %rcx, %rcx
-	jle lf1
-	iaddq $1, %rax
-
-lf1:
-	mrmovq (%rdi), %rcx
-	rmmovq %rcx, (%rsi)
-	andq %rcx, %rcx
-	jle Done
+    jne Done
+    mrmovq (%rdi), %rcx
+    rmmovq %rcx, (%rsi)
+    andq %rcx, %rcx
 	iaddq $1, %rax
 
 ##################################################################
@@ -122,66 +73,66 @@ EndFun:
 ###############################
 	.align 8
 src:
-	.quad 1
+	.quad -1
 	.quad 2
 	.quad -3
 	.quad -4
-	.quad -5
-	.quad -6
-	.quad 7
+	.quad 5
+	.quad 6
+	.quad -7
 	.quad 8
 	.quad 9
-	.quad -10
-	.quad 11
-	.quad 12
-	.quad -13
-	.quad -14
+	.quad 10
+	.quad -11
+	.quad -12
+	.quad 13
+	.quad 14
 	.quad 15
 	.quad 16
 	.quad -17
-	.quad -18
-	.quad -19
-	.quad -20
+	.quad 18
+	.quad 19
+	.quad 20
 	.quad -21
-	.quad -22
+	.quad 22
 	.quad -23
-	.quad -24
+	.quad 24
 	.quad -25
 	.quad 26
 	.quad -27
-	.quad 28
+	.quad -28
 	.quad 29
 	.quad -30
 	.quad 31
-	.quad 32
-	.quad 33
-	.quad -34
+	.quad -32
+	.quad -33
+	.quad 34
 	.quad -35
 	.quad 36
-	.quad 37
+	.quad -37
 	.quad 38
 	.quad 39
-	.quad 40
+	.quad -40
 	.quad 41
 	.quad 42
-	.quad 43
-	.quad -44
-	.quad -45
-	.quad -46
+	.quad -43
+	.quad 44
+	.quad 45
+	.quad 46
 	.quad -47
-	.quad 48
-	.quad 49
-	.quad 50
+	.quad -48
+	.quad -49
+	.quad -50
 	.quad -51
-	.quad 52
-	.quad -53
+	.quad -52
+	.quad 53
 	.quad -54
 	.quad 55
 	.quad 56
-	.quad 57
-	.quad -58
+	.quad -57
+	.quad 58
 	.quad -59
-	.quad 60
+	.quad -60
 	.quad -61
 	.quad -62
 	.quad -63
