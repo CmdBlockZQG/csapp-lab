@@ -12,6 +12,197 @@
 
 int is_transpose(int M, int N, int A[N][M], int B[M][N]);
 
+void solve_32_32(int A[32][32], int B[32][32]) {
+    int bi, bj, i, j;
+    for (bi = 0; bi < 32; bi += 8) {
+        for (bj = 0; bj < 32; bj += 8) {
+            if (bi == bj) continue;
+            for (i = 0; i < 8; ++i) {
+                for (j = 0; j < 8; ++j) {
+                    B[bj + j][bi + i] = A[bi + i][bj + j];
+                }
+            }
+        }
+    }
+    int a0, a1, a2, a3, a4, a5, a6, a7;
+    for (bi = 0; bi < 32; bi += 8) {
+        for (i = 0; i < 8; ++i) {
+            a0 = A[bi + i][bi + 0];
+            a1 = A[bi + i][bi + 1];
+            a2 = A[bi + i][bi + 2];
+            a3 = A[bi + i][bi + 3];
+            a4 = A[bi + i][bi + 4];
+            a5 = A[bi + i][bi + 5];
+            a6 = A[bi + i][bi + 6];
+            a7 = A[bi + i][bi + 7];
+
+            B[bi + 0][bi + i] = a0;
+            B[bi + 1][bi + i] = a1;
+            B[bi + 2][bi + i] = a2;
+            B[bi + 3][bi + i] = a3;
+            B[bi + 4][bi + i] = a4;
+            B[bi + 5][bi + i] = a5;
+            B[bi + 6][bi + i] = a6;
+            B[bi + 7][bi + i] = a7;
+        }
+    }
+    
+}
+
+void tp_p1(int A[64][64], int B[64][64], int ai, int aj, int bi, int bj, int ci, int cj) {
+    int i, j;
+    // A1->B1
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[bi + j][bj + i] = A[ai + i][aj + j];
+        }
+    }
+    // A2->C
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[ci + j][cj + i] = A[ai + i][aj + 4 + j];
+        }
+    }
+    // A3->B3
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[bi + j][bj + 4 + i] = A[ai + 4 + i][aj + j];
+        }
+    }
+    // C->B2
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[bi + 4 + i][bj + j] = B[ci + i][cj + j];
+        }
+    }
+    // A4->B4
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[bi + 4 + j][bj + 4 + i] = A[ai + 4 + i][aj + 4 + j];
+        }
+    }
+}
+
+void tp_p1_d(int A[64][64], int B[64][64], int ai, int aj, int ci, int cj) {
+    tp_p1(A, B, ai, aj, aj, ai, ci, cj);
+    tp_p1(A, B, aj, ai, ai, aj, ci, cj);
+}
+
+void tp_p2(int A[64][64], int B[64][64], int ai, int aj) {
+    int i, j;
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 8; ++j) {
+            B[16 + i][16 + j] = A[ai + i][aj + j];
+        }
+    }
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 8; ++j) {
+            B[24 + i][24 + j] = A[ai + 4 + i][aj + j];
+        }
+    }
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[aj + j][ai + i] = B[16 + i][16 + j];
+            B[aj + j][ai + 4 + i] = B[24 + i][24 + j];
+        }
+    }
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[aj + 4 + j][ai + i] = B[16 + i][20 + j];
+            B[aj + 4 + j][ai + 4 + i] = B[24 + i][28 + j];
+        }
+    }
+}
+
+void tp_p3(int A[64][64], int B[64][64], int ai, int aj) {
+    int i, j;
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 8; ++j) {
+            B[24 + i][24 + j] = A[ai + i][aj + j];
+        }
+    }
+    for (i = 0; i < 8; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[aj + i][ai + j] = B[24 + j][24 + i];
+        }
+    }
+    for (i = 0; i < 4; ++i) {
+        for (j = 0; j < 8; ++j) {
+            B[24 + i][24 + j] = A[ai + 4 + i][aj + j];
+        }
+    }
+    for (i = 0; i < 8; ++i) {
+        for (j = 0; j < 4; ++j) {
+            B[aj + i][ai + 4 + j] = B[24 + j][24 + i];
+        }
+    }
+}
+
+void tp_p4(int A[64][64], int B[64][64], int ai, int aj) {
+    int ci, cj, i, a0, a1, a2, a3;
+    for (ci = 0; ci < 8; ci += 4) {
+        for (cj = 0; cj < 8; cj += 4) {
+            for (i = 0; i < 4; ++i) {
+                a0 = A[ai + ci + i][aj + cj + 0];
+                a1 = A[ai + ci + i][aj + cj + 1];
+                a2 = A[ai + ci + i][aj + cj + 2];
+                a3 = A[ai + ci + i][aj + cj + 3];
+
+                B[aj + cj + 0][ai + ci + i] = a0;
+                B[aj + cj + 1][ai + ci + i] = a1;
+                B[aj + cj + 2][ai + ci + i] = a2;
+                B[aj + cj + 3][ai + ci + i] = a3;
+            }
+        }
+    }
+}
+
+void solve_64_64(int A[64][64], int B[64][64]) {
+    int ci, cj;
+    // phase 1
+    for (ci = 0; ci < 64; ci += 32) {
+        for (cj = 0; cj < 64; cj += 32) {
+            tp_p1_d(A, B, ci, cj + 16, 8, 8);
+            tp_p1_d(A, B, ci, cj + 24, 8, 8);
+            tp_p1_d(A, B, ci + 16, cj + 24, 8, 8);
+        }
+    }
+    for (ci = 0; ci < 64; ci += 32) {
+        for (cj = 0; cj < 64; cj += 32) {
+            tp_p1_d(A, B, ci, cj + 8, 16, 16);
+            tp_p1_d(A, B, ci + 8, cj + 24, 16, 16);
+        }
+    }
+    for (ci = 0; ci < 64; ci += 32) {
+        for (cj = 0; cj < 64; cj += 32) {
+            tp_p1_d(A, B, ci + 8, cj + 16, 24, 24);
+        }
+    }
+    // phase 2
+    for (ci = 0; ci < 64; ci += 32) {
+        for (cj = 0; cj < 64; cj += 32) {
+            tp_p2(A, B, ci, cj);
+            tp_p2(A, B, ci + 8, cj + 8);
+        }
+    }
+    // phase 3
+    for (ci = 0; ci < 64; ci += 32) {
+        for (cj = 0; cj < 64; cj += 32) {
+            tp_p3(A, B, ci + 16, cj + 16);
+        }
+    }
+    // phase 4
+    for (ci = 0; ci < 64; ci += 32) {
+        for (cj = 0; cj < 64; cj += 32) {
+            tp_p4(A, B, ci + 24, cj + 24);
+        }
+    }
+}
+
+void solve_61_67(int A[61][67], int B[61][67]) {
+
+}
+
 /* 
  * transpose_submit - This is the solution transpose function that you
  *     will be graded on for Part B of the assignment. Do not change
@@ -22,6 +213,10 @@ int is_transpose(int M, int N, int A[N][M], int B[M][N]);
 char transpose_submit_desc[] = "Transpose submission";
 void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 {
+    if (M == 32 && N == 32) solve_32_32(A, B);
+    else if (M == 64 && N == 64) solve_64_64(A, B);
+    else if (M == 61 && N == 67) solve_61_67(A, B);
+    else correctTrans(M, N, A, B);
 }
 
 /* 

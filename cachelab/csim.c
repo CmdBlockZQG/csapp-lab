@@ -157,5 +157,6 @@ int main(int argc, char *argv[]) {
     walk(traceFile);
     fclose(traceFile);
     printSummary(hits, misses, evictions);
+    free(cache);
     return 0;
 }
