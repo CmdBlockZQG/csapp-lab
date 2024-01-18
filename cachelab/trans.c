@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include "cachelab.h"
 
+#define max(a,b) ((a) > (b) ? (a) : (b))
+#define min(a,b) ((a) < (b) ? (a) : (b))
+
 int is_transpose(int M, int N, int A[N][M], int B[M][N]);
 
 void solve_32_32(int A[32][32], int B[32][32]) {
@@ -179,8 +182,18 @@ void solve_64_64(int A[64][64], int B[64][64]) {
     tp_p4(A, B);
 }
 
-void solve_61_67(int A[61][67], int B[61][67]) {
-
+void solve_61_67(int A[67][61], int B[61][67]) {
+    const int cx = 21, cy = 12;
+    int ci, cj, i, j;
+    for (ci = 0; ci < 61; ci += cx) {
+        for (cj = 0; cj < 67; cj += cy) {
+            for (i = ci; i < min(61, ci + cx); ++i) {
+                for (j = cj; j < min(67, cj + cy); ++j) {
+                    B[i][j] = A[j][i];
+                }
+            }
+        }
+    }
 }
 
 /* 
