@@ -113,24 +113,55 @@ static void list_push(void *blk, int size) {
     SET_CLASS_HEAD_BLK(class, blk);
 }
 
-static void alloc_block(void *blk, size_t sz) {
-    size_t free_sz = BLK_SIZE(blk);
-    if (free_sz >= sz + 4 * WORD_SIZE) {
-        free_sz -= sz + WORD_SIZE;
+static void alloc_block(void *blk, size_t size) {
+    size_t free_size = BLK_SIZE(blk);
+    if (free_size >= size + 4 * WORD_SIZE) {
+        free_size -= size + WORD_SIZE;
         list_rm(blk);
         assert(BLK_PREV_ALLOC(blk));
-        SET_BLK_HEADER(blk, PACK(sz, 1, 1));
+        SET_BLK_HEADER(blk, PACK(size, 1, 1));
 
         void *free_blk = NEXT_BLK(blk);
-        SET_BLK_HEADER(free_blk, PACK(free_sz, 1, 0));
-        SET_BLK_FOOTER(free_blk, free_sz);
-        list_push(free_blk, free_sz);
+        SET_BLK_HEADER(free_blk, PACK(free_size, 1, 0));
+        SET_BLK_FOOTER(free_blk, free_size);
+        list_push(free_blk, free_size);
     } else {
         SET_PREV_ALLOC(NEXT_BLK(blk), 1);
         SET_BLK_ALLOC(blk, 1);
         list_rm(blk);
     }
 }
+
+int compare_ptrs(const void *a, const void *b) {
+    void *arg1 = *(void**)a;
+    void *arg2 = *(void**)b;
+ 
+    if (arg1 < arg2) return -1;
+    if (arg1 > arg2) return 1;
+    return 0;
+}
+
+
+void mm_check() {
+    void *free_blks[20000];
+    int free_blks_cnt = 0;
+    for (int class = 0; class < CLASS_NUM; ++class) {
+        for (void *blk = CLASS_HEAD_BLK(class); blk != NULL; blk = NEXT_FREE_BLK(blk)) {
+            free_blks[free_blks_cnt++] = blk;
+        }
+    }
+    qsort(free_blks, free_blks_cnt, sizeof(void *), compare_ptrs);
+    int i = 0;
+    for (void *blk = FIRST_BLK; blk < TOP; blk = NEXT_BLK(blk)) {
+        assert(BLK_PREV_ALLOC(NEXT_BLK(blk)) == BLK_ALLOC(blk));
+        if (BLK_ALLOC(blk)) {
+        } else {
+            assert(free_blks[i++] == blk);
+            assert(BLK_SIZE(blk) == GET(BLK_FOOTER_PTR(blk)));
+        }
+    }
+}
+
 
 /* 
  * mm_init - initialize the malloc package.
@@ -143,6 +174,7 @@ int mm_init(void) {
         p += WORD_SIZE;
     }
     SET(p, PACK(0, 1, 1)); // top block
+    mm_check();
     return 0;
 }
 
@@ -158,6 +190,7 @@ void *mm_malloc(size_t size) {
         for (blk = CLASS_HEAD_BLK(class); blk != NULL; blk = NEXT_FREE_BLK(blk)) {
             if (BLK_SIZE(blk) >= size) {
                 alloc_block(blk, size);
+                mm_check();
                 return blk;
             }
         }
@@ -173,6 +206,7 @@ void *mm_malloc(size_t size) {
     }
     SET_BLK_HEADER(blk, PACK(size, 1, 1));
     SET_BLK_HEADER(TOP, PACK(0, 1, 1));
+    mm_check();
     return blk;
 }
 
@@ -197,30 +231,60 @@ void mm_free(void *ptr) {
         assert(BLK_ALLOC(NEXT_BLK(next_blk)));
         list_rm(next_blk);
         size += BLK_SIZE(next_blk) + WORD_SIZE;
-        SET_PREV_ALLOC(NEXT_BLK(next_blk), 0);
+        // SET_PREV_ALLOC(NEXT_BLK(next_blk), 0);
     }
     SET_BLK_HEADER(blk, PACK(size, 1, 0));
     SET_BLK_FOOTER(blk, size);
     list_push(blk, size);
+    mm_check();
 }
 
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
 void *mm_realloc(void *ptr, size_t size) {
-    return NULL;
+    size_t orig_size = BLK_SIZE(ptr);
+    size = align(size);
+
+    void *next_blk = NEXT_BLK(ptr);
+
+    if (size <= orig_size) { // shrink current block
+        // decide not to split current block, do nothing and return original ptr
+        if (orig_size < size + 4 * WORD_SIZE) {
+            mm_check();
+            return ptr;
+        }
+        // split current block into two parts, the latter is free
+        size_t free_size = orig_size - size - WORD_SIZE;
+        if (BLK_ALLOC(next_blk)) { // next block is alloc
+            SET_PREV_ALLOC(next_blk, 0);
+        } else { // next block is free, combine the free space
+            assert(BLK_ALLOC(NEXT_BLK(next_blk)));
+            list_rm(next_blk);
+            free_size += BLK_SIZE(next_blk) + WORD_SIZE;
+        }
+        SET_BLK_HEADER(ptr, PACK(size, BLK_PREV_ALLOC(ptr), 1));
+        void *free_blk = NEXT_BLK(ptr);
+        SET_BLK_HEADER(free_blk, PACK(free_size, 1, 0));
+        SET_BLK_FOOTER(free_blk, free_size);
+        list_push(free_blk, free_size);
+        mm_check();
+        return ptr;
+    }
+
+    // current block needs expansion
+    // next block is free and total space is enough for expansion
+    if (!BLK_ALLOC(next_blk) && orig_size + BLK_SIZE(next_blk) + WORD_SIZE >= size) {
+        alloc_block(next_blk, size - orig_size - WORD_SIZE);
+        SET_BLK_HEADER(ptr, PACK(size, BLK_PREV_ALLOC(ptr), 1));
+        mm_check();
+        return ptr;
+    }
+
+    // need to do malloc & copy & free
+    void *new_blk = mm_malloc(size);
+    memcpy(new_blk, ptr, orig_size);
+    mm_free(ptr);
+    mm_check();
+    return new_blk;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
